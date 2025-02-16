@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Collaborative Editor</title>
+    <style>
+      body {
+        margin: 0;
+        padding-bottom: 3rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+
+      #editor-container {
+        height: 90vh;
+        padding: 1rem;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    <link
+      href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="editor-container">
+      <div id="editor">
+        <h2>Collaborative Document</h2>
+      </div>
+    </div>
+  </body>
+</html>
+
+<script src="http://localhost:8000/socket.io/socket.io.js"></script>
+<!-- <script src="http://localhost:8000/socket.io/socket.io.js"></script> -->
+
+<script src="http://localhost:8000/socket.io/socket.io.js"></script>
+<script>
+  const socket = io("http://localhost:8000");
+
+  // Initialize Quill editor
+  const quill = new Quill("#editor", {
+    theme: "snow",
+  });
+
+  // Generate a random document hash and save it to the URL if it doesn’t exist
+  const documentHash =
+    window.location.hash.substring(1) || generateAndSetHash();
+
+  // Step 1: Generate a new hash and set it in the URL
+  function generateAndSetHash() {
+    const hash = Math.random().toString(36).substring(2, 10);
+    window.location.hash = hash;
+    return hash;
+  }
+
+  // Step 2: Create a new document on the server with the generated hash
+  async function createDocument() {
+    const response = await fetch(`http://localhost:8000/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: documentHash }),
+    });
+    if (response.ok) {
+      console.log(`Document ${documentHash} created on the server.`);
+    } else {
+      console.error("Error creating document:", await response.text());
+    }
+  }
+
+  // Step 3: Load the document content from the server
+  async function loadDocumentContent() {
+    const response = await fetch(
+      `http://localhost:8000/documents/${documentHash}`,
+    );
+    if (response.ok) {
+      const documentData = await response.json();
+      quill.setContents(documentData.content);
+    } else {
+      console.log("New document will be created on the server.");
+    }
+  }
+
+  // Initialize document by creating it and loading content
+  async function initializeDocument() {
+    await createDocument();
+    await loadDocumentContent();
+  }
+
+  // Emit join-document event with the document hash to join the specific room
+  socket.emit("join-document", documentHash);
+
+  // Load and initialize the document on page load
+  initializeDocument();
+
+  // Flag to prevent loop of events
+  let isTypingLocally = false;
+
+  // Listen for changes in the editor
+  quill.on("text-change", (delta, oldDelta, source) => {
+    if (source === "user") {
+      isTypingLocally = true;
+      socket.emit("text-change", documentHash, delta);
+      isTypingLocally = false;
+    }
+  });
+
+  // Listen for changes from the server and update the editor
+  socket.on("text-change", (delta) => {
+    if (!isTypingLocally) {
+      quill.updateContents(delta);
+    }
+  });
+
+  // Save document content to the backend on Ctrl+S
+  document.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && event.key === "s") {
+      event.preventDefault();
+      saveDocument();
+    }
+  });
+
+  // Function to save the document
+  function saveDocument() {
+    const content = quill.getContents();
+    socket.emit("save-document", documentHash, content);
+    console.log("Document saved.");
+  }
+</script>

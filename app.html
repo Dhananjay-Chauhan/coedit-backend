@@ -1,0 +1,241 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Collaborative Editor</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+
+      #editor-container {
+        height: 70vh;
+        padding: 1rem;
+        border: 1px solid #ccc;
+      }
+
+      #comment-sidebar {
+        width: 20%;
+        float: right;
+        height: 70vh;
+        border-left: 1px solid #ccc;
+        overflow-y: auto;
+        padding: 1rem;
+      }
+
+      #chat-container {
+        height: 20vh;
+        border-top: 1px solid #ccc;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #chat-messages {
+        flex-grow: 1;
+        overflow-y: auto;
+        padding: 0.5rem;
+        border-bottom: 1px solid #ccc;
+      }
+
+      #chat-input {
+        display: flex;
+        padding: 0.5rem;
+      }
+
+      #chat-input input {
+        flex-grow: 1;
+        padding: 0.5rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+
+      #chat-input button {
+        margin-left: 0.5rem;
+        padding: 0.5rem;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    <link
+      href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="editor-container">
+      <div id="editor">
+        <h2>Collaborative Document</h2>
+      </div>
+    </div>
+
+    <div id="chat-container">
+      <div id="chat-messages"></div>
+      <div id="chat-input">
+        <input type="text" id="message-input" placeholder="Type a message..." />
+        <button id="send-message">Send</button>
+      </div>
+    </div>
+  </body>
+</html>
+
+<script src="http://localhost:8000/socket.io/socket.io.js"></script>
+<script>
+  const socket = io("http://localhost:8000");
+
+
+  const animalNames = [
+    "Lion", "Tiger", "Bear", "Monkey", "Kangaroo", "Penguin", "Giraffe", 
+    "Elephant", "Zebra", "Horse", "Cow", "Dog", "Cat", "Wolf", "Fox", 
+    "Rabbit", "Deer", "Squirrel", "Chipmunk", "Hedgehog", "Raccoon", 
+    "Otter", "Seal", "Walrus", "Dolphin", "Whale", "Shark", "Ray", 
+    "Turtle", "Crocodile", "Alligator", "Snake", "Lizard", "Frog", 
+    "Toad", "Eagle", "Hawk", "Falcon", "Parrot", "Owl", "Flamingo", 
+    "Pigeon", "Sparrow", "Crow", "Raven", "Swan", "Duck", "Goose", 
+    "Turkey", "Chicken", "Fish", "Butterfly", "Bee", "Ant", "Grasshopper", 
+    "Caterpillar", "Ladybug", "Firefly", "Dragonfly", "Spider", "Scorpion", 
+    "Octopus", "Squid", "Jellyfish", "Starfish", "Crab", "Lobster", 
+    "Shrimp", "Clownfish", "Goldfish", "Hamster", "Guinea pig", 
+    "Ferret", "Rat", "Mouse", "Salamander", "Newt", "Gecko", 
+    "Iguana", "Chameleon", "Komodo dragon", "Cheetah", "Hyena", 
+    "Mongoose", "Meerkat", "Warthog", "Rhino", "Hippopotamus", 
+    "Cobra", "Viper", "Boa", "Python", "Anaconda", "Jaguar", 
+    "Leopard", "Puma", "Cougar", "Wildcat", "Mole", "Vole", 
+    "Marmot", "Groundhog", "Prairie dog", "Sloth", "Armadillo", 
+    "Opossum", "Okapi", "Gazelle", "Antelope", "Sheep", "Goat", 
+    "Donkey", "Mule", "Yak", "Camel", "Llama", "Alpaca", 
+    "Water buffalo", "Bison", "Elk", "Moose", "Reindeer", 
+    "Caribou", "Polar bear", "Koala", "Wombat", "Tasmanian devil", 
+    "Quokka", "Numbat", "Platypus", "Echidna", "Chinchilla", 
+    "Skunk", "Rhea", "Emu", "Ostrich", "Peacock", "Pheasant", 
+    "Gopher", "Badger", "Weasel", "Mink", "Otter", "Beaver", 
+    "Muskrat", "Capypbara", "Agouti", "Paca", "Tapir", "Lemur"
+];
+const randomAnimal = animalNames[Math.floor(Math.random() * animalNames.length)];
+
+
+  //const currentUser = `User_${Math.random().toString(36).substring(2, 6)}`; // Temporary user ID
+  const currentUser = 'Anonymous '+randomAnimal;
+
+  // Initialize Quill editor
+  const quill = new Quill("#editor", {
+    theme: "snow",
+  });
+
+  const documentHash =
+    window.location.hash.substring(1) || generateAndSetHash();
+
+  function generateAndSetHash() {
+    const hash = Math.random().toString(36).substring(2, 10);
+    window.location.hash = hash;
+    return hash;
+  }
+
+  async function createDocument() {
+    const response = await fetch(`http://localhost:8000/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: documentHash }),
+    });
+    if (!response.ok) {
+      console.error("Error creating document:", await response.text());
+    }
+  }
+
+  async function loadDocumentContent() {
+    const response = await fetch(
+      `http://localhost:8000/documents/${documentHash}`,
+    );
+    if (response.ok) {
+      const documentData = await response.json();
+      quill.setContents(documentData.content);
+    } else {
+      console.log("New document will be created.");
+    }
+  }
+
+  async function initializeDocument() {
+    await createDocument();
+    await loadDocumentContent();
+  }
+
+  socket.emit("join-document", { hash: documentHash, user: currentUser });
+  initializeDocument();
+
+  let isTypingLocally = false;
+
+  quill.on("text-change", (delta, oldDelta, source) => {
+    if (source === "user") {
+      isTypingLocally = true;
+      socket.emit("text-change", documentHash, delta);
+      isTypingLocally = false;
+    }
+  });
+
+  socket.on("text-change", (delta) => {
+    if (!isTypingLocally) {
+      quill.updateContents(delta);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && event.key === "s") {
+      event.preventDefault();
+      saveDocument();
+    }
+  });
+
+  function saveDocument() {
+    const content = quill.getContents();
+    socket.emit("save-document", documentHash, content);
+    console.log("Document saved.");
+  }
+
+  // Handle cursor position tracking
+  quill.on("selection-change", (range) => {
+    socket.emit("cursor-position", documentHash, { user: currentUser, range });
+  });
+
+  socket.on("cursor-position", (cursorData) => {
+    showCursor(cursorData.user, cursorData.range);
+  });
+
+  function showCursor(user, range) {
+    console.log(`Cursor update for ${user}:`, range);
+  }
+
+  // Chat
+  const messageInput = document.getElementById("message-input");
+  const sendMessageButton = document.getElementById("send-message");
+  const chatMessagesDiv = document.getElementById("chat-messages");
+
+  sendMessageButton.addEventListener("click", sendMessage);
+
+  function sendMessage() {
+    const message = messageInput.value;
+    fetch(`http://localhost:8000/documents/${documentHash}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user: currentUser, message }),
+    });
+    messageInput.value = "";
+  }
+
+  async function loadChatMessages() {
+    const response = await fetch(
+      `http://localhost:8000/documents/${documentHash}/chat`,
+    );
+    const chatMessages = await response.json();
+    chatMessagesDiv.innerHTML = chatMessages
+      .map((msg) => `<div>${msg.user}: ${msg.message}</div>`)
+      .join("");
+  }
+
+  loadChatMessages();
+  setInterval(loadChatMessages, 3000); // Refresh chat every 3 seconds
+</script>
